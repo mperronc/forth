@@ -1,18 +1,47 @@
 using System;
 using System.Text;
 using System.Collections;
+using System.Collections.Generic;
 
 public static class Forth
 {
+    private enum EvaluationState {
+        Normal,
+        ReadingUserDefinition,  // Reading what comes after the word until ;
+        ReadingUserWord         // Reading the identifier after :
+    }
+
+
     private class ForthProgram {
         private Stack Stack;
+
+        private Dictionary<string, string[]> UserWords;
+
+        private EvaluationState EvaluationState;
+
+        private string CurrentUserWordDefinition;
+        private List<string> UserWordDefinitionBuffer;
+
+
         public ForthProgram() {
             Stack = new Stack();
+            UserWords = new Dictionary<string, string[]>();
+            EvaluationState = EvaluationState.Normal;
+            UserWordDefinitionBuffer = new List<string>();
         }
 
         public void EvaluateToken(string tok) {
             int number;
-            if (int.TryParse(tok, out number)) {
+            if (EvaluationState == EvaluationState.Normal && UserWords.ContainsKey(tok)) {
+                EvaluateUserWord(tok);
+            }
+            else if (EvaluationState == EvaluationState.ReadingUserWord) {
+                RegisterUserWord(tok);
+            }
+            else if (tok != ";" && EvaluationState == EvaluationState.ReadingUserDefinition) {
+                UserWordDefinitionBuffer.Add(tok);
+            }
+            else if (int.TryParse(tok, out number)) {
                 Stack.Push(number);
             } else {
                 switch (tok)
@@ -25,8 +54,38 @@ public static class Forth
                     case "drop": Drop(); break;
                     case "swap": Swap(); break;
                     case "over": Over(); break;
-                    default: throw new ArgumentException();
+                    case ":": BeginRegisterUserWord(); break;
+                    case ";": EndRegisterUserWord(); break;
                 }
+            }
+        }
+
+        private void BeginRegisterUserWord() {
+            UserWordDefinitionBuffer.Clear();
+            EvaluationState = EvaluationState.ReadingUserWord;
+        }
+
+        private void RegisterUserWord(string tok) {
+            CurrentUserWordDefinition = tok;
+            EvaluationState = EvaluationState.ReadingUserDefinition;
+        }
+
+        private void EndRegisterUserWord() {
+            bool newWord = UserWords.TryAdd(CurrentUserWordDefinition, new string[UserWordDefinitionBuffer.Count]);
+            if (newWord) {
+                UserWordDefinitionBuffer.CopyTo(UserWords[CurrentUserWordDefinition]);
+                EvaluationState = EvaluationState.Normal;
+            } else {
+                UserWords[CurrentUserWordDefinition] = new string[UserWordDefinitionBuffer.Count];
+                UserWordDefinitionBuffer.CopyTo(UserWords[CurrentUserWordDefinition]);
+                EvaluationState = EvaluationState.Normal;
+            }
+
+        }
+
+        private void EvaluateUserWord(string word) {
+            foreach (string tok in UserWords[word]) {
+                EvaluateToken(tok);
             }
         }
 
@@ -58,29 +117,35 @@ public static class Forth
             Stack.Push(n2);
         }
 
-        public string ToString() {
-            StringBuilder sb = new StringBuilder();
-            object[] arr = Stack.ToArray();
-            Array.Reverse(arr);
-            foreach (int n in arr)
-            {  
-               sb.Append(n);
-               sb.Append(" "); 
+        public override string ToString() {
+            object[] reverseStack = Stack.ToArray();
+            Array.Reverse(reverseStack);
+
+            StringBuilder str = new StringBuilder("");
+
+            if (reverseStack.Length > 0) {
+                str.Append(reverseStack[0]);
             }
-            if (sb.Length > 0) sb.Remove(sb.Length - 1, 1);
-            return sb.ToString();
+
+            for (int i = 1; i < reverseStack.Length; i++) {
+                str.Append(" ");
+                str.Append(reverseStack[i]);
+            }
+
+            return str.ToString();
         }
     }
 
 
     public static string Evaluate(string[] instructions)
     {
-        string[] tokens = instructions[0].Split(" ");
-
         ForthProgram program = new ForthProgram();
 
-        foreach (string tok in tokens) {
-            program.EvaluateToken(tok.ToLower());
+        foreach (string line in instructions) {
+            string[] tokens = line.Split(" "); 
+            foreach (string tok in tokens) {
+                program.EvaluateToken(tok.ToLower());
+            }
         }
 
         return program.ToString();
